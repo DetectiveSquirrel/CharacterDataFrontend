@@ -1,0 +1,12 @@
+{
+    "name": "snapshot-dashboard",
+    "version": "1.0.0",
+    "description": "A static dark-themed dashboard for snapshot data using Plotly.",
+    "scripts": {
+      "build": "tsc && npm run copy-static",
+      "copy-static": "cp index.html js/ && cp -r css js/ && cp -r assets js/ 2>/dev/null || true"
+    },
+    "devDependencies": {
+      "typescript": "^4.0.0"
+    }
+  }

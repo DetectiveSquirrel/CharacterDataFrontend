@@ -1,0 +1,12 @@
+{
+    "compilerOptions": {
+      "target": "ES2015",
+      "module": "ESNext",
+      "outDir": "./js",
+      "rootDir": "./ts",
+      "strict": true,
+      "esModuleInterop": true
+    },
+    "include": ["ts/**/*"]
+  }
+  
