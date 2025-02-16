@@ -25,11 +25,10 @@ jobs:
       - name: Build TypeScript
         run: npm run build
 
-      # No need to copy files since they're already in the correct structure
       - name: Deploy to GitHub Pages
         if: github.ref == 'refs/heads/main'
         uses: JamesIves/github-pages-deploy-action@v4
         with:
-          folder: .           # Deploy the entire project
+          folder: .
           branch: gh-pages
-          clean: true        # Automatically remove deleted files from deployment
+          clean: true
