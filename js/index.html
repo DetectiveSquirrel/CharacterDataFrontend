@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dynamic Snapshot Dashboard</title>
+    <link rel="stylesheet" href="css/styles.css" />
+    <!-- Include Chart.js and date adapter -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+  </head>
+  <body>
+    <header>
+      <h1>Dynamic Snapshot Dashboard</h1>
+    </header>
+    <section id="file-loader">
+      <div id="drop-zone">
+        <p>
+          Drag and drop your JSON file here or
+          <label for="file-input" class="button">open file</label>
+        </p>
+        <input type="file" id="file-input" accept=".json" />
+      </div>
+    </section>
+    <div id="mainContent">
+      <div id="chartWrapper">
+        <!-- The chart canvas will be injected here -->
+      </div>
+      <div id="fieldSelector">
+        <!-- The field selector buttons will be generated here -->
+      </div>
+    </div>
+    <script src="js/main.js"></script>
+  </body>
+</html>
