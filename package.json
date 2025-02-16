@@ -4,7 +4,9 @@
     "description": "A static dark-themed dashboard for snapshot data using Plotly.",
     "scripts": {
       "build": "tsc && npm run copy-static",
-      "copy-static": "cp index.html js/ && cp -r css js/ && cp -r assets js/ 2>/dev/null || true"
+      "build:windows": "tsc && npm run copy-static:windows",
+      "copy-static": "cp index.html js/ && cp -r css js/ && cp -r assets js/ 2>/dev/null || true",
+      "copy-static:windows": "xcopy /Y index.html js\\ && xcopy /Y /S /I css js\\css && if exist assets xcopy /Y /S /I assets js\\assets"
     },
     "devDependencies": {
       "typescript": "^4.0.0"
