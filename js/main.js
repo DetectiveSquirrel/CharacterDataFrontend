@@ -13,7 +13,7 @@ function flattenSnapshot(obj, time, prefix = "", inheritedAreaName) {
             if (key === "SnapshotTime")
                 continue;
             const value = obj[key];
-            const newPrefix = prefix ? `${prefix}.${key}` : key;
+            const newPrefix = prefix ? `${prefix}-${key}` : key;
             if (value !== null &&
                 typeof value === "object" &&
                 !Array.isArray(value)) {
@@ -89,7 +89,7 @@ function renderChartDynamic() {
         const seriesKey = seriesKeys[i];
         const sortedData = seriesData[seriesKey].sort((a, b) => a.x.getTime() - b.x.getTime());
         const color = getRandomColor();
-        const visible = seriesKey === "Player.Level";
+        const visible = seriesKey === "Player-Level";
         datasets.push({
             label: seriesKey,
             data: sortedData,
@@ -268,7 +268,8 @@ function renderChartDynamic() {
                         label: function (tooltipItem) {
                             const datasetLabel = tooltipItem.dataset.label || "";
                             const value = tooltipItem.parsed.y;
-                            return `${datasetLabel}: ${value}`;
+                            const formattedValue = Number(value).toLocaleString();
+                            return `${datasetLabel}: ${formattedValue}`;
                         },
                     },
                 },
