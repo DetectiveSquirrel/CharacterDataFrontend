@@ -10,7 +10,83 @@ interface DataPoint {
   y: number;
   areaName?: string;
 }
+
 let seriesData: { [key: string]: DataPoint[] } = {};
+
+const verticalLinePlugin = {
+  id: "verticalLinePlugin",
+  afterDraw(chart: any, args: any, options: any) {
+    if (
+      chart.tooltip &&
+      chart.tooltip._active &&
+      chart.tooltip._active.length
+    ) {
+      const ctx = chart.ctx;
+      const activePoint = chart.tooltip._active[0];
+      const x = activePoint.element.x;
+      const yScale = chart.scales.y;
+      ctx.save();
+      ctx.beginPath();
+      ctx.setLineDash([5, 5]);
+      ctx.moveTo(x, yScale.top);
+      ctx.lineTo(x, yScale.bottom);
+      ctx.strokeStyle = options.lineColor || "rgba(255,255,255,0.4)";
+      ctx.lineWidth = options.lineWidth || 1;
+      ctx.stroke();
+      ctx.restore();
+    }
+  },
+};
+
+let chartInstance: any = null;
+
+let persistentFileHandle: FileSystemFileHandle | null = null;
+
+const VISIBILITY_STORAGE_KEY = "datasetVisibility";
+
+function loadVisibilityMap(): { [key: string]: boolean } {
+  const stored = localStorage.getItem(VISIBILITY_STORAGE_KEY);
+  if (stored) {
+    try {
+      return JSON.parse(stored);
+    } catch (e) {
+      console.error("Error parsing datasetVisibility:", e);
+      return {};
+    }
+  }
+  return {};
+}
+
+function saveVisibilityMap(map: { [key: string]: boolean }): void {
+  localStorage.setItem(VISIBILITY_STORAGE_KEY, JSON.stringify(map));
+}
+
+function stringToColor(str: string): string {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  let r = (hash >> 0) & 0xff;
+  let g = (hash >> 8) & 0xff;
+  let b = (hash >> 16) & 0xff;
+
+  const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+  const minBrightness = 130;
+
+  if (brightness < minBrightness) {
+    const factor = minBrightness / brightness;
+    r = Math.min(255, Math.round(r * factor));
+    g = Math.min(255, Math.round(g * factor));
+    b = Math.min(255, Math.round(b * factor));
+  }
+
+  const toHex = (c: number): string => {
+    const hex = c.toString(16);
+    return hex.length === 1 ? "0" + hex : hex;
+  };
+
+  return "#" + toHex(r) + toHex(g) + toHex(b);
+}
 
 function flattenSnapshot(
   obj: any,
@@ -63,40 +139,6 @@ function processDynamicSnapshots(data: SnapshotData[]): void {
   });
 }
 
-function getRandomColor(): string {
-  const letters = "0123456789ABCDEF";
-  let color = "#";
-  for (let i = 0; i < 6; i++) {
-    color += letters[Math.floor(Math.random() * 16)];
-  }
-  return color;
-}
-const verticalLinePlugin = {
-  id: "verticalLinePlugin",
-  afterDraw(chart: any, args: any, options: any) {
-    if (
-      chart.tooltip &&
-      chart.tooltip._active &&
-      chart.tooltip._active.length
-    ) {
-      const ctx = chart.ctx;
-      const activePoint = chart.tooltip._active[0];
-      const x = activePoint.element.x;
-      const yScale = chart.scales.y;
-      ctx.save();
-      ctx.beginPath();
-      ctx.setLineDash([5, 5]);
-      ctx.moveTo(x, yScale.top);
-      ctx.lineTo(x, yScale.bottom);
-      ctx.strokeStyle = options.lineColor || "rgba(255,255,255,0.4)";
-      ctx.lineWidth = options.lineWidth || 1;
-      ctx.stroke();
-      ctx.restore();
-    }
-  },
-};
-let chartInstance: any = null;
-
 function renderChartDynamic(): void {
   const chartContainer = document.getElementById("chartWrapper");
   if (!chartContainer) return;
@@ -110,21 +152,26 @@ function renderChartDynamic(): void {
 
   const datasets: any[] = [];
   const seriesKeys = Object.keys(seriesData);
+  const visibilityMap = loadVisibilityMap();
+
   for (let i = 0; i < seriesKeys.length; i++) {
     const seriesKey = seriesKeys[i];
     const sortedData = seriesData[seriesKey].sort(
       (a, b) => a.x.getTime() - b.x.getTime()
     );
-    const color: string = getRandomColor();
-    const visible = seriesKey === "Player-Level";
+    const isVisible =
+      typeof visibilityMap[seriesKey] !== "undefined"
+        ? visibilityMap[seriesKey]
+        : seriesKey === "Player-Level";
+
     datasets.push({
       label: seriesKey,
       data: sortedData,
-      borderColor: color,
-      backgroundColor: color,
+      borderColor: stringToColor(seriesKey),
+      backgroundColor: stringToColor(seriesKey),
       fill: false,
       tension: 0.1,
-      hidden: !visible,
+      hidden: !isVisible,
     });
   }
 
@@ -162,6 +209,7 @@ function renderChartDynamic(): void {
     }
     return acc;
   }, [] as number[]);
+
   const suggestedMin =
     visibleYValues.length > 0
       ? Math.floor(Math.min(...visibleYValues))
@@ -328,8 +376,10 @@ interface DatasetToggle {
 
 function updateFieldSelector(): void {
   const fieldContainer = document.getElementById("fieldSelector");
-  if (!fieldContainer) return;
+  if (!fieldContainer || !chartInstance) return;
   fieldContainer.innerHTML = "";
+
+  const visibilityMap = loadVisibilityMap();
 
   const datasetInfo: DatasetToggle[] = chartInstance.data.datasets.map(
     (dataset: any, index: number): DatasetToggle => ({
@@ -354,6 +404,8 @@ function updateFieldSelector(): void {
     itemDiv.onclick = () => {
       const currentlyVisible = chartInstance.isDatasetVisible(info.index);
       chartInstance.setDatasetVisibility(info.index, !currentlyVisible);
+      visibilityMap[info.label] = !currentlyVisible;
+      saveVisibilityMap(visibilityMap);
       chartInstance.update();
       updateFieldSelector();
     };
@@ -372,33 +424,37 @@ function updateFieldSelector(): void {
   });
 }
 
-function initFileLoader(): void {
-  const dropZone = document.getElementById("drop-zone");
-  const fileInput = document.getElementById(
-    "file-input"
-  ) as HTMLInputElement | null;
-  if (!dropZone || !fileInput) return;
+async function selectFileFS(): Promise<void> {
+  if (!(window as any).showOpenFilePicker) {
+    alert("The File System Access API is not supported in this browser.");
+    return;
+  }
+  try {
+    const [handle]: FileSystemFileHandle[] = await (
+      window as any
+    ).showOpenFilePicker();
+    persistentFileHandle = handle;
+    const file: File = await handle.getFile();
+    readFile(file);
+  } catch (error) {
+    console.error("Error selecting file via FS API:", error);
+  }
+}
 
-  dropZone.addEventListener("dragover", (e) => {
-    e.preventDefault();
-    dropZone.classList.add("hover");
-  });
-  dropZone.addEventListener("dragleave", (e) => {
-    e.preventDefault();
-    dropZone.classList.remove("hover");
-  });
-  dropZone.addEventListener("drop", (e) => {
-    e.preventDefault();
-    dropZone.classList.remove("hover");
-    if (e.dataTransfer?.files.length) {
-      readFile(e.dataTransfer.files[0]);
+async function refreshFile(): Promise<void> {
+  if (persistentFileHandle) {
+    try {
+      const file: File = await persistentFileHandle.getFile();
+      readFile(file);
+    } catch (error) {
+      console.error("Error refreshing file:", error);
+      alert("Error refreshing file. Please try re-selecting it.");
     }
-  });
-  fileInput.addEventListener("change", () => {
-    if (fileInput.files && fileInput.files.length > 0) {
-      readFile(fileInput.files[0]);
-    }
-  });
+  } else {
+    alert(
+      "No persistent file selection available. Please select a file using the button."
+    );
+  }
 }
 
 function readFile(file: File): void {
@@ -425,6 +481,20 @@ function readFile(file: File): void {
   };
   reader.readAsText(file);
 }
-window.addEventListener("load", () => {
-  initFileLoader();
+
+document.addEventListener("DOMContentLoaded", () => {
+  const selectButton = document.getElementById("select-file-button");
+  const refreshButton = document.getElementById("refresh-button");
+
+  if (selectButton) {
+    selectButton.addEventListener("click", () => {
+      selectFileFS();
+    });
+  }
+
+  if (refreshButton) {
+    refreshButton.addEventListener("click", () => {
+      refreshFile();
+    });
+  }
 });

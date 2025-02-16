@@ -1,5 +1,77 @@
 "use strict";
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
 let seriesData = {};
+const verticalLinePlugin = {
+    id: "verticalLinePlugin",
+    afterDraw(chart, args, options) {
+        if (chart.tooltip &&
+            chart.tooltip._active &&
+            chart.tooltip._active.length) {
+            const ctx = chart.ctx;
+            const activePoint = chart.tooltip._active[0];
+            const x = activePoint.element.x;
+            const yScale = chart.scales.y;
+            ctx.save();
+            ctx.beginPath();
+            ctx.setLineDash([5, 5]);
+            ctx.moveTo(x, yScale.top);
+            ctx.lineTo(x, yScale.bottom);
+            ctx.strokeStyle = options.lineColor || "rgba(255,255,255,0.4)";
+            ctx.lineWidth = options.lineWidth || 1;
+            ctx.stroke();
+            ctx.restore();
+        }
+    },
+};
+let chartInstance = null;
+let persistentFileHandle = null;
+const VISIBILITY_STORAGE_KEY = "datasetVisibility";
+function loadVisibilityMap() {
+    const stored = localStorage.getItem(VISIBILITY_STORAGE_KEY);
+    if (stored) {
+        try {
+            return JSON.parse(stored);
+        }
+        catch (e) {
+            console.error("Error parsing datasetVisibility:", e);
+            return {};
+        }
+    }
+    return {};
+}
+function saveVisibilityMap(map) {
+    localStorage.setItem(VISIBILITY_STORAGE_KEY, JSON.stringify(map));
+}
+function stringToColor(str) {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    let r = (hash >> 0) & 0xff;
+    let g = (hash >> 8) & 0xff;
+    let b = (hash >> 16) & 0xff;
+    const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+    const minBrightness = 130;
+    if (brightness < minBrightness) {
+        const factor = minBrightness / brightness;
+        r = Math.min(255, Math.round(r * factor));
+        g = Math.min(255, Math.round(g * factor));
+        b = Math.min(255, Math.round(b * factor));
+    }
+    const toHex = (c) => {
+        const hex = c.toString(16);
+        return hex.length === 1 ? "0" + hex : hex;
+    };
+    return "#" + toHex(r) + toHex(g) + toHex(b);
+}
 function flattenSnapshot(obj, time, prefix = "", inheritedAreaName) {
     let areaInfo = inheritedAreaName;
     if (obj.areaName && typeof obj.areaName === "string") {
@@ -42,37 +114,6 @@ function processDynamicSnapshots(data) {
         flattenSnapshot(snapshot, time, "", inheritedAreaName);
     });
 }
-function getRandomColor() {
-    const letters = "0123456789ABCDEF";
-    let color = "#";
-    for (let i = 0; i < 6; i++) {
-        color += letters[Math.floor(Math.random() * 16)];
-    }
-    return color;
-}
-const verticalLinePlugin = {
-    id: "verticalLinePlugin",
-    afterDraw(chart, args, options) {
-        if (chart.tooltip &&
-            chart.tooltip._active &&
-            chart.tooltip._active.length) {
-            const ctx = chart.ctx;
-            const activePoint = chart.tooltip._active[0];
-            const x = activePoint.element.x;
-            const yScale = chart.scales.y;
-            ctx.save();
-            ctx.beginPath();
-            ctx.setLineDash([5, 5]);
-            ctx.moveTo(x, yScale.top);
-            ctx.lineTo(x, yScale.bottom);
-            ctx.strokeStyle = options.lineColor || "rgba(255,255,255,0.4)";
-            ctx.lineWidth = options.lineWidth || 1;
-            ctx.stroke();
-            ctx.restore();
-        }
-    },
-};
-let chartInstance = null;
 function renderChartDynamic() {
     const chartContainer = document.getElementById("chartWrapper");
     if (!chartContainer)
@@ -85,19 +126,21 @@ function renderChartDynamic() {
     chartContainer.appendChild(canvas);
     const datasets = [];
     const seriesKeys = Object.keys(seriesData);
+    const visibilityMap = loadVisibilityMap();
     for (let i = 0; i < seriesKeys.length; i++) {
         const seriesKey = seriesKeys[i];
         const sortedData = seriesData[seriesKey].sort((a, b) => a.x.getTime() - b.x.getTime());
-        const color = getRandomColor();
-        const visible = seriesKey === "Player-Level";
+        const isVisible = typeof visibilityMap[seriesKey] !== "undefined"
+            ? visibilityMap[seriesKey]
+            : seriesKey === "Player-Level";
         datasets.push({
             label: seriesKey,
             data: sortedData,
-            borderColor: color,
-            backgroundColor: color,
+            borderColor: stringToColor(seriesKey),
+            backgroundColor: stringToColor(seriesKey),
             fill: false,
             tension: 0.1,
-            hidden: !visible,
+            hidden: !isVisible,
         });
     }
     let minTime = Infinity;
@@ -292,9 +335,10 @@ function renderChartDynamic() {
 }
 function updateFieldSelector() {
     const fieldContainer = document.getElementById("fieldSelector");
-    if (!fieldContainer)
+    if (!fieldContainer || !chartInstance)
         return;
     fieldContainer.innerHTML = "";
+    const visibilityMap = loadVisibilityMap();
     const datasetInfo = chartInstance.data.datasets.map((dataset, index) => ({
         label: dataset.label,
         color: dataset.borderColor,
@@ -311,6 +355,8 @@ function updateFieldSelector() {
         itemDiv.onclick = () => {
             const currentlyVisible = chartInstance.isDatasetVisible(info.index);
             chartInstance.setDatasetVisibility(info.index, !currentlyVisible);
+            visibilityMap[info.label] = !currentlyVisible;
+            saveVisibilityMap(visibilityMap);
             chartInstance.update();
             updateFieldSelector();
         };
@@ -325,30 +371,37 @@ function updateFieldSelector() {
         fieldContainer.appendChild(itemDiv);
     });
 }
-function initFileLoader() {
-    const dropZone = document.getElementById("drop-zone");
-    const fileInput = document.getElementById("file-input");
-    if (!dropZone || !fileInput)
-        return;
-    dropZone.addEventListener("dragover", (e) => {
-        e.preventDefault();
-        dropZone.classList.add("hover");
-    });
-    dropZone.addEventListener("dragleave", (e) => {
-        e.preventDefault();
-        dropZone.classList.remove("hover");
-    });
-    dropZone.addEventListener("drop", (e) => {
-        var _a;
-        e.preventDefault();
-        dropZone.classList.remove("hover");
-        if ((_a = e.dataTransfer) === null || _a === void 0 ? void 0 : _a.files.length) {
-            readFile(e.dataTransfer.files[0]);
+function selectFileFS() {
+    return __awaiter(this, void 0, void 0, function* () {
+        if (!window.showOpenFilePicker) {
+            alert("The File System Access API is not supported in this browser.");
+            return;
+        }
+        try {
+            const [handle] = yield window.showOpenFilePicker();
+            persistentFileHandle = handle;
+            const file = yield handle.getFile();
+            readFile(file);
+        }
+        catch (error) {
+            console.error("Error selecting file via FS API:", error);
         }
     });
-    fileInput.addEventListener("change", () => {
-        if (fileInput.files && fileInput.files.length > 0) {
-            readFile(fileInput.files[0]);
+}
+function refreshFile() {
+    return __awaiter(this, void 0, void 0, function* () {
+        if (persistentFileHandle) {
+            try {
+                const file = yield persistentFileHandle.getFile();
+                readFile(file);
+            }
+            catch (error) {
+                console.error("Error refreshing file:", error);
+                alert("Error refreshing file. Please try re-selecting it.");
+            }
+        }
+        else {
+            alert("No persistent file selection available. Please select a file using the button.");
         }
     });
 }
@@ -377,6 +430,17 @@ function readFile(file) {
     };
     reader.readAsText(file);
 }
-window.addEventListener("load", () => {
-    initFileLoader();
+document.addEventListener("DOMContentLoaded", () => {
+    const selectButton = document.getElementById("select-file-button");
+    const refreshButton = document.getElementById("refresh-button");
+    if (selectButton) {
+        selectButton.addEventListener("click", () => {
+            selectFileFS();
+        });
+    }
+    if (refreshButton) {
+        refreshButton.addEventListener("click", () => {
+            refreshFile();
+        });
+    }
 });
