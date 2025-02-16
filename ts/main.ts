@@ -156,6 +156,21 @@ function renderChartDynamic(): void {
     }
   }
 
+  const visibleYValues = datasets.reduce((acc: number[], ds) => {
+    if (!ds.hidden) {
+      return acc.concat(ds.data.map((point: DataPoint) => point.y));
+    }
+    return acc;
+  }, [] as number[]);
+  const suggestedMin =
+    visibleYValues.length > 0
+      ? Math.floor(Math.min(...visibleYValues))
+      : undefined;
+  const suggestedMax =
+    visibleYValues.length > 0
+      ? Math.ceil(Math.max(...visibleYValues))
+      : undefined;
+
   const config: any = {
     type: "line",
     data: {
@@ -165,6 +180,11 @@ function renderChartDynamic(): void {
       responsive: true,
       maintainAspectRatio: false,
       parsing: false,
+      interaction: {
+        mode: "nearest",
+        axis: "x",
+        intersect: false,
+      },
       layout: {
         padding: { left: 2, right: 2, bottom: 10, top: 10 },
       },
@@ -176,10 +196,10 @@ function renderChartDynamic(): void {
             round: false,
             tooltipFormat: "MMM d, h:mm:ss a",
             displayFormats: {
-              millisecond: "HH:mm:ss.SSS",
-              second: "HH:mm:ss",
-              minute: "HH:mm",
-              hour: "MMM d, HH:mm",
+              millisecond: "h:mm:ss.SSS a",
+              second: "h:mm:ss a",
+              minute: "h:mm a",
+              hour: "MMM d, h:mm a",
               day: "MMM d",
               week: "MMM d",
               month: "MMM yyyy",
@@ -238,12 +258,8 @@ function renderChartDynamic(): void {
               weight: "400",
             },
             padding: 8,
-            suggestedMin: Math.floor(
-              Math.min(...datasets[0].data.map((point: DataPoint) => point.y))
-            ),
-            suggestedMax: Math.ceil(
-              Math.max(...datasets[0].data.map((point: DataPoint) => point.y))
-            ),
+            suggestedMin: suggestedMin,
+            suggestedMax: suggestedMax,
           },
           title: {
             display: true,
@@ -262,27 +278,16 @@ function renderChartDynamic(): void {
       },
       plugins: {
         tooltip: {
-          mode: "index",
-          intersect: false,
-          backgroundColor: "rgba(0, 0, 0, 0.8)",
-          titleColor: "#eeeeee",
-          bodyColor: "#eeeeee",
-          borderColor: "rgba(238, 238, 238, 0.2)",
-          borderWidth: 1,
-          padding: 8,
-          titleFont: { weight: "500" },
-          bodyFont: { weight: "400" },
           callbacks: {
             beforeTitle: function (tooltipItems: any): string[] {
               return [tooltipItems[0].label];
             },
             title: function (tooltipItems: any): string[] {
-              if (
-                tooltipItems.length > 0 &&
-                tooltipItems[0].raw &&
-                tooltipItems[0].raw.areaName
-              ) {
-                return [tooltipItems[0].raw.areaName];
+              for (let i = 0; i < tooltipItems.length; i++) {
+                const raw = tooltipItems[i].raw;
+                if (raw && raw.areaName) {
+                  return [raw.areaName];
+                }
               }
               return [];
             },
@@ -312,6 +317,7 @@ function renderChartDynamic(): void {
 
   updateFieldSelector();
 }
+
 interface DatasetToggle {
   label: string;
   color: string;
