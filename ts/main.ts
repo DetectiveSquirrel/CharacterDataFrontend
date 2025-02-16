@@ -29,7 +29,7 @@ function flattenSnapshot(
     if (obj.hasOwnProperty(key)) {
       if (key === "SnapshotTime") continue;
       const value = obj[key];
-      const newPrefix = prefix ? `${prefix}.${key}` : key;
+      const newPrefix = prefix ? `${prefix}-${key}` : key;
 
       if (
         value !== null &&
@@ -116,7 +116,7 @@ function renderChartDynamic(): void {
       (a, b) => a.x.getTime() - b.x.getTime()
     );
     const color: string = getRandomColor();
-    const visible = seriesKey === "Player.Level";
+    const visible = seriesKey === "Player-Level";
     datasets.push({
       label: seriesKey,
       data: sortedData,
@@ -294,7 +294,8 @@ function renderChartDynamic(): void {
             label: function (tooltipItem: any): string {
               const datasetLabel = tooltipItem.dataset.label || "";
               const value = tooltipItem.parsed.y;
-              return `${datasetLabel}: ${value}`;
+              const formattedValue = Number(value).toLocaleString();
+              return `${datasetLabel}: ${formattedValue}`;
             },
           },
         },
