@@ -327,7 +327,7 @@ function renderChartDynamic(): void {
       layout: {
         padding: { left: 2, right: 2, bottom: 10, top: 10 },
       },
-      animations: {
+      animation: {
         duration: 0,
       },
       scales: {
