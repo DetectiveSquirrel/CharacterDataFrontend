@@ -327,32 +327,8 @@ function renderChartDynamic(): void {
       layout: {
         padding: { left: 2, right: 2, bottom: 10, top: 10 },
       },
-
       animations: {
-        x: {
-          easing: "easeOutCubic",
-          duration: 1000,
-        },
-        y: {
-          easing: "easeOutCubic",
-          duration: 1000,
-        },
-      },
-
-      transitions: {
-        zoom: {
-          animation: {
-            duration: 1000,
-            easing: "easeOutCubic",
-          },
-        },
-
-        update: {
-          animation: {
-            duration: 1000,
-            easing: "easeOutCubic",
-          },
-        },
+        duration: 0,
       },
       scales: {
         x: {
