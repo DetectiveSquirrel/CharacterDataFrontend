@@ -80,23 +80,6 @@ function refreshFile() {
         }
     });
 }
-function selectFileFS() {
-    return __awaiter(this, void 0, void 0, function* () {
-        if (!window.showOpenFilePicker) {
-            alert('The File System Access API is not supported in this browser.');
-            return;
-        }
-        try {
-            const [handle] = yield window.showOpenFilePicker();
-            persistentFileHandle = handle;
-            const file = yield handle.getFile();
-            readFile(file);
-        }
-        catch (error) {
-            console.error('Error selecting file via FS API:', error);
-        }
-    });
-}
 function addPointsForObject(obj, keyPrefix, time, preTitleLines) {
     for (const key in obj) {
         if (!Object.prototype.hasOwnProperty.call(obj, key))
@@ -157,6 +140,35 @@ function stringToColor(str) {
         return hex.length === 1 ? '0' + hex : hex;
     };
     return '#' + toHex(r) + toHex(g) + toHex(b);
+}
+function selectFileFS() {
+    return __awaiter(this, void 0, void 0, function* () {
+        if (!window.showOpenFilePicker) {
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.style.display = 'none';
+            fileInput.addEventListener('change', (event) => {
+                const target = event.target;
+                if (target.files && target.files.length > 0) {
+                    const file = target.files[0];
+                    readFile(file);
+                }
+            });
+            document.body.appendChild(fileInput);
+            fileInput.click();
+            document.body.removeChild(fileInput);
+            return;
+        }
+        try {
+            const [handle] = yield window.showOpenFilePicker();
+            persistentFileHandle = handle;
+            const file = yield handle.getFile();
+            readFile(file);
+        }
+        catch (error) {
+            console.error('Error selecting file via FS API:', error);
+        }
+    });
 }
 function updateFieldSelector() {
     const fieldContainer = document.getElementById('fieldSelector');
@@ -456,9 +468,16 @@ document.addEventListener('DOMContentLoaded', () => {
             selectFileFS();
         });
     }
-    if (refreshButton) {
-        refreshButton.addEventListener('click', () => {
-            refreshFile();
-        });
+    if (typeof window.showOpenFilePicker === 'undefined') {
+        if (refreshButton) {
+            refreshButton.disabled = true;
+        }
+    }
+    else {
+        if (refreshButton) {
+            refreshButton.addEventListener('click', () => {
+                refreshFile();
+            });
+        }
     }
 });

@@ -28,6 +28,12 @@ header {
 	text-decoration: underline;
 	cursor: pointer;
 }
+.button:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+	pointer-events: none;
+}
+
 #mainContent {
 	display: flex;
 	flex: 1 1 auto;
@@ -85,7 +91,6 @@ header {
 	padding: 2em;
 	margin: 1em auto;
 	width: 95%;
-	cursor: pointer;
 	background-color: #1e1e1e;
 	text-align: center;
 }

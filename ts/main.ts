@@ -76,21 +76,6 @@ async function refreshFile(): Promise<void> {
 	}
 }
 
-async function selectFileFS(): Promise<void> {
-	if (!(window as any).showOpenFilePicker) {
-		alert('The File System Access API is not supported in this browser.');
-		return;
-	}
-	try {
-		const [handle]: FileSystemFileHandle[] = await (window as any).showOpenFilePicker();
-		persistentFileHandle = handle;
-		const file: File = await handle.getFile();
-		readFile(file);
-	} catch (error) {
-		console.error('Error selecting file via FS API:', error);
-	}
-}
-
 function addPointsForObject(obj: Record<string, any>, keyPrefix: string, time: Date, preTitleLines: string[]): void {
 	for (const key in obj) {
 		if (!Object.prototype.hasOwnProperty.call(obj, key)) continue;
@@ -156,6 +141,36 @@ function stringToColor(str: string): string {
 	};
 
 	return '#' + toHex(r) + toHex(g) + toHex(b);
+}
+
+async function selectFileFS(): Promise<void> {
+	if (!(window as any).showOpenFilePicker) {
+		const fileInput = document.createElement('input');
+		fileInput.type = 'file';
+		fileInput.style.display = 'none';
+
+		fileInput.addEventListener('change', (event: Event) => {
+			const target = event.target as HTMLInputElement;
+			if (target.files && target.files.length > 0) {
+				const file = target.files[0];
+				readFile(file);
+			}
+		});
+
+		document.body.appendChild(fileInput);
+		fileInput.click();
+		document.body.removeChild(fileInput);
+		return;
+	}
+
+	try {
+		const [handle]: FileSystemFileHandle[] = await (window as any).showOpenFilePicker();
+		persistentFileHandle = handle;
+		const file: File = await handle.getFile();
+		readFile(file);
+	} catch (error) {
+		console.error('Error selecting file via FS API:', error);
+	}
 }
 
 function updateFieldSelector(): void {
@@ -484,8 +499,8 @@ function renderChartDynamic(): void {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-	const selectButton = document.getElementById('select-file-button');
-	const refreshButton = document.getElementById('refresh-button');
+	const selectButton = document.getElementById('select-file-button') as HTMLButtonElement;
+	const refreshButton = document.getElementById('refresh-button') as HTMLButtonElement;
 
 	if (selectButton) {
 		selectButton.addEventListener('click', () => {
@@ -493,9 +508,15 @@ document.addEventListener('DOMContentLoaded', () => {
 		});
 	}
 
-	if (refreshButton) {
-		refreshButton.addEventListener('click', () => {
-			refreshFile();
-		});
+	if (typeof (window as any).showOpenFilePicker === 'undefined') {
+		if (refreshButton) {
+			refreshButton.disabled = true;
+		}
+	} else {
+		if (refreshButton) {
+			refreshButton.addEventListener('click', () => {
+				refreshFile();
+			});
+		}
 	}
 });
