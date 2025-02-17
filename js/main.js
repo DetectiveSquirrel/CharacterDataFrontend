@@ -8,6 +8,9 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+let chartInstance = null;
+let persistentFileHandle = null;
+const VISIBILITY_STORAGE_KEY = "datasetVisibility";
 let seriesData = {};
 const verticalLinePlugin = {
     id: "verticalLinePlugin",
@@ -31,9 +34,9 @@ const verticalLinePlugin = {
         }
     },
 };
-let chartInstance = null;
-let persistentFileHandle = null;
-const VISIBILITY_STORAGE_KEY = "datasetVisibility";
+function saveVisibilityMap(map) {
+    localStorage.setItem(VISIBILITY_STORAGE_KEY, JSON.stringify(map));
+}
 function loadVisibilityMap() {
     const stored = localStorage.getItem(VISIBILITY_STORAGE_KEY);
     if (stored) {
@@ -47,8 +50,74 @@ function loadVisibilityMap() {
     }
     return {};
 }
-function saveVisibilityMap(map) {
-    localStorage.setItem(VISIBILITY_STORAGE_KEY, JSON.stringify(map));
+function processDynamicSnapshots(data) {
+    seriesData = {};
+    data.forEach((snapshot) => {
+        const time = new Date(snapshot.SnapshotTime * 1000);
+        const inheritedAreaName = snapshot.Area && snapshot.Area.Name && snapshot.Area.Level !== undefined
+            ? `${snapshot.Area.Name} (${snapshot.Area.Level})`
+            : undefined;
+        flattenSnapshot(snapshot, time, "", inheritedAreaName);
+    });
+}
+function refreshFile() {
+    return __awaiter(this, void 0, void 0, function* () {
+        if (persistentFileHandle) {
+            try {
+                const file = yield persistentFileHandle.getFile();
+                readFile(file);
+            }
+            catch (error) {
+                console.error("Error refreshing file:", error);
+                alert("Error refreshing file. Please try re-selecting it.");
+            }
+        }
+        else {
+            alert("No persistent file selection available. Please select a file using the button.");
+        }
+    });
+}
+function selectFileFS() {
+    return __awaiter(this, void 0, void 0, function* () {
+        if (!window.showOpenFilePicker) {
+            alert("The File System Access API is not supported in this browser.");
+            return;
+        }
+        try {
+            const [handle] = yield window.showOpenFilePicker();
+            persistentFileHandle = handle;
+            const file = yield handle.getFile();
+            readFile(file);
+        }
+        catch (error) {
+            console.error("Error selecting file via FS API:", error);
+        }
+    });
+}
+function readFile(file) {
+    const reader = new FileReader();
+    reader.onload = () => {
+        try {
+            let fileContent = reader.result;
+            if (typeof fileContent !== "string") {
+                fileContent = String(fileContent);
+            }
+            fileContent = fileContent.trim();
+            console.log("File content (first 500 chars):", fileContent.slice(0, 500));
+            const jsonData = JSON.parse(fileContent);
+            if (!Array.isArray(jsonData)) {
+                alert("JSON must be an array of snapshots!");
+                return;
+            }
+            processDynamicSnapshots(jsonData);
+            renderChartDynamic();
+        }
+        catch (err) {
+            alert("Error parsing JSON file!");
+            console.error(err);
+        }
+    };
+    reader.readAsText(file);
 }
 function stringToColor(str) {
     let hash = 0;
@@ -104,14 +173,42 @@ function flattenSnapshot(obj, time, prefix = "", inheritedAreaName) {
         }
     }
 }
-function processDynamicSnapshots(data) {
-    seriesData = {};
-    data.forEach((snapshot) => {
-        const time = new Date(snapshot.SnapshotTime * 1000);
-        const inheritedAreaName = snapshot.Area && snapshot.Area.Name && snapshot.Area.Level !== undefined
-            ? `${snapshot.Area.Name} (${snapshot.Area.Level})`
-            : undefined;
-        flattenSnapshot(snapshot, time, "", inheritedAreaName);
+function updateFieldSelector() {
+    const fieldContainer = document.getElementById("fieldSelector");
+    if (!fieldContainer || !chartInstance)
+        return;
+    fieldContainer.innerHTML = "";
+    const visibilityMap = loadVisibilityMap();
+    const datasetInfo = chartInstance.data.datasets.map((dataset, index) => ({
+        label: dataset.label,
+        color: dataset.borderColor,
+        visible: chartInstance.isDatasetVisible(index),
+        index: index,
+    }));
+    datasetInfo.sort((a, b) => a.label.localeCompare(b.label));
+    datasetInfo.forEach((info) => {
+        const itemDiv = document.createElement("div");
+        itemDiv.className = "field-item";
+        if (info.visible) {
+            itemDiv.classList.add("active");
+        }
+        itemDiv.onclick = () => {
+            const currentlyVisible = chartInstance.isDatasetVisible(info.index);
+            chartInstance.setDatasetVisibility(info.index, !currentlyVisible);
+            visibilityMap[info.label] = !currentlyVisible;
+            saveVisibilityMap(visibilityMap);
+            chartInstance.update();
+            updateFieldSelector();
+        };
+        const colorBox = document.createElement("div");
+        colorBox.className = "color-box";
+        colorBox.style.backgroundColor = info.color;
+        const labelSpan = document.createElement("span");
+        labelSpan.className = "field-label";
+        labelSpan.innerText = info.label;
+        itemDiv.appendChild(colorBox);
+        itemDiv.appendChild(labelSpan);
+        fieldContainer.appendChild(itemDiv);
     });
 }
 function renderChartDynamic() {
@@ -154,28 +251,6 @@ function renderChartDynamic() {
                 maxTime = t;
         });
     });
-    let timeUnit = "hour";
-    if (isFinite(minTime) && isFinite(maxTime)) {
-        const dataRange = maxTime - minTime;
-        if (dataRange < 60 * 60 * 1000) {
-            timeUnit = "minute";
-        }
-        else if (dataRange < 24 * 60 * 60 * 1000) {
-            timeUnit = "hour";
-        }
-        else if (dataRange < 7 * 24 * 60 * 60 * 1000) {
-            timeUnit = "day";
-        }
-        else if (dataRange < 30 * 24 * 60 * 60 * 1000) {
-            timeUnit = "week";
-        }
-        else if (dataRange < 365 * 24 * 60 * 60 * 1000) {
-            timeUnit = "month";
-        }
-        else {
-            timeUnit = "year";
-        }
-    }
     const visibleYValues = datasets.reduce((acc, ds) => {
         if (!ds.hidden) {
             return acc.concat(ds.data.map((point) => point.y));
@@ -205,15 +280,38 @@ function renderChartDynamic() {
             layout: {
                 padding: { left: 2, right: 2, bottom: 10, top: 10 },
             },
+            animations: {
+                x: {
+                    easing: "easeOutCubic",
+                    duration: 1000,
+                },
+                y: {
+                    easing: "easeOutCubic",
+                    duration: 1000,
+                },
+            },
+            transitions: {
+                zoom: {
+                    animation: {
+                        duration: 1000,
+                        easing: "easeOutCubic",
+                    },
+                },
+                update: {
+                    animation: {
+                        duration: 1000,
+                        easing: "easeOutCubic",
+                    },
+                },
+            },
             scales: {
                 x: {
                     type: "time",
                     time: {
-                        unit: timeUnit,
                         round: false,
                         tooltipFormat: "MMM d, h:mm:ss a",
                         displayFormats: {
-                            millisecond: "h:mm:ss.SSS a",
+                            millisecond: "h:mm:ss a",
                             second: "h:mm:ss a",
                             minute: "h:mm a",
                             hour: "MMM d, h:mm a",
@@ -230,23 +328,23 @@ function renderChartDynamic() {
                     },
                     ticks: {
                         color: "#eeeeee",
-                        maxRotation: 45,
-                        minRotation: 45,
+                        maxRotation: 30,
+                        minRotation: 0,
                         font: {
-                            size: 11,
+                            size: 15,
                             family: "system-ui, -apple-system, sans-serif",
                             weight: "400",
                         },
                         autoSkip: true,
                         autoSkipPadding: 40,
-                        maxTicksLimit: 15,
+                        maxTicksLimit: 20,
                     },
                     title: {
                         display: true,
                         text: "Time",
                         color: "#eeeeee",
                         font: {
-                            size: 13,
+                            size: 15,
                             weight: "500",
                             family: "system-ui, -apple-system, sans-serif",
                         },
@@ -270,7 +368,7 @@ function renderChartDynamic() {
                     ticks: {
                         color: "#eeeeee",
                         font: {
-                            size: 11,
+                            size: 14,
                             family: "system-ui, -apple-system, sans-serif",
                             weight: "400",
                         },
@@ -283,7 +381,7 @@ function renderChartDynamic() {
                         text: "Value",
                         color: "#eeeeee",
                         font: {
-                            size: 13,
+                            size: 14,
                             weight: "500",
                             family: "system-ui, -apple-system, sans-serif",
                         },
@@ -319,9 +417,22 @@ function renderChartDynamic() {
                 legend: {
                     display: false,
                 },
-            },
-            animation: {
-                duration: 0,
+                zoom: {
+                    pan: {
+                        enabled: true,
+                        mode: "x",
+                        threshold: 10,
+                    },
+                    zoom: {
+                        wheel: {
+                            enabled: true,
+                        },
+                        pinch: {
+                            enabled: true,
+                        },
+                        mode: "x",
+                    },
+                },
             },
         },
         plugins: [verticalLinePlugin],
@@ -331,104 +442,17 @@ function renderChartDynamic() {
     }
     const ctx = canvas.getContext("2d");
     chartInstance = new Chart(ctx, config);
+    canvas.addEventListener("mousedown", (event) => {
+        if (event.button === 1) {
+            event.preventDefault();
+        }
+    });
+    canvas.addEventListener("mouseup", (event) => {
+        if (event.button === 1 && chartInstance) {
+            chartInstance.resetZoom();
+        }
+    });
     updateFieldSelector();
-}
-function updateFieldSelector() {
-    const fieldContainer = document.getElementById("fieldSelector");
-    if (!fieldContainer || !chartInstance)
-        return;
-    fieldContainer.innerHTML = "";
-    const visibilityMap = loadVisibilityMap();
-    const datasetInfo = chartInstance.data.datasets.map((dataset, index) => ({
-        label: dataset.label,
-        color: dataset.borderColor,
-        visible: chartInstance.isDatasetVisible(index),
-        index: index,
-    }));
-    datasetInfo.sort((a, b) => a.label.localeCompare(b.label));
-    datasetInfo.forEach((info) => {
-        const itemDiv = document.createElement("div");
-        itemDiv.className = "field-item";
-        if (info.visible) {
-            itemDiv.classList.add("active");
-        }
-        itemDiv.onclick = () => {
-            const currentlyVisible = chartInstance.isDatasetVisible(info.index);
-            chartInstance.setDatasetVisibility(info.index, !currentlyVisible);
-            visibilityMap[info.label] = !currentlyVisible;
-            saveVisibilityMap(visibilityMap);
-            chartInstance.update();
-            updateFieldSelector();
-        };
-        const colorBox = document.createElement("div");
-        colorBox.className = "color-box";
-        colorBox.style.backgroundColor = info.color;
-        const labelSpan = document.createElement("span");
-        labelSpan.className = "field-label";
-        labelSpan.innerText = info.label;
-        itemDiv.appendChild(colorBox);
-        itemDiv.appendChild(labelSpan);
-        fieldContainer.appendChild(itemDiv);
-    });
-}
-function selectFileFS() {
-    return __awaiter(this, void 0, void 0, function* () {
-        if (!window.showOpenFilePicker) {
-            alert("The File System Access API is not supported in this browser.");
-            return;
-        }
-        try {
-            const [handle] = yield window.showOpenFilePicker();
-            persistentFileHandle = handle;
-            const file = yield handle.getFile();
-            readFile(file);
-        }
-        catch (error) {
-            console.error("Error selecting file via FS API:", error);
-        }
-    });
-}
-function refreshFile() {
-    return __awaiter(this, void 0, void 0, function* () {
-        if (persistentFileHandle) {
-            try {
-                const file = yield persistentFileHandle.getFile();
-                readFile(file);
-            }
-            catch (error) {
-                console.error("Error refreshing file:", error);
-                alert("Error refreshing file. Please try re-selecting it.");
-            }
-        }
-        else {
-            alert("No persistent file selection available. Please select a file using the button.");
-        }
-    });
-}
-function readFile(file) {
-    const reader = new FileReader();
-    reader.onload = () => {
-        try {
-            let fileContent = reader.result;
-            if (typeof fileContent !== "string") {
-                fileContent = String(fileContent);
-            }
-            fileContent = fileContent.trim();
-            console.log("File content (first 500 chars):", fileContent.slice(0, 500));
-            const jsonData = JSON.parse(fileContent);
-            if (!Array.isArray(jsonData)) {
-                alert("JSON must be an array of snapshots!");
-                return;
-            }
-            processDynamicSnapshots(jsonData);
-            renderChartDynamic();
-        }
-        catch (err) {
-            alert("Error parsing JSON file!");
-            console.error(err);
-        }
-    };
-    reader.readAsText(file);
 }
 document.addEventListener("DOMContentLoaded", () => {
     const selectButton = document.getElementById("select-file-button");
