@@ -10,14 +10,14 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 };
 let chartInstance = null;
 let persistentFileHandle = null;
-const VISIBILITY_STORAGE_KEY = "datasetVisibility";
+const keyConnecter = ' → ';
+const VISIBILITY_STORAGE_KEY = 'datasetVisibility';
+const EXCLUDED_KEYS = new Set(['SnapshotTime']);
 let seriesData = {};
 const verticalLinePlugin = {
-    id: "verticalLinePlugin",
-    afterDraw(chart, args, options) {
-        if (chart.tooltip &&
-            chart.tooltip._active &&
-            chart.tooltip._active.length) {
+    id: 'verticalLinePlugin',
+    afterDraw(chart, options) {
+        if (chart.tooltip && chart.tooltip._active && chart.tooltip._active.length) {
             const ctx = chart.ctx;
             const activePoint = chart.tooltip._active[0];
             const x = activePoint.element.x;
@@ -27,15 +27,21 @@ const verticalLinePlugin = {
             ctx.setLineDash([5, 5]);
             ctx.moveTo(x, yScale.top);
             ctx.lineTo(x, yScale.bottom);
-            ctx.strokeStyle = options.lineColor || "rgba(255,255,255,0.4)";
+            ctx.strokeStyle = options.lineColor || 'rgba(255,255,255,0.4)';
             ctx.lineWidth = options.lineWidth || 1;
             ctx.stroke();
             ctx.restore();
         }
-    },
+    }
 };
 function saveVisibilityMap(map) {
     localStorage.setItem(VISIBILITY_STORAGE_KEY, JSON.stringify(map));
+}
+function formatCumulativeTime(seconds) {
+    const hr = Math.floor(seconds / 3600);
+    const min = Math.floor((seconds % 3600) / 60);
+    const sec = Math.floor(seconds % 60);
+    return `${hr > 0 ? hr + 'h ' : ''}${min > 0 ? min + 'm ' : ''}${sec}s`;
 }
 function loadVisibilityMap() {
     const stored = localStorage.getItem(VISIBILITY_STORAGE_KEY);
@@ -44,21 +50,18 @@ function loadVisibilityMap() {
             return JSON.parse(stored);
         }
         catch (e) {
-            console.error("Error parsing datasetVisibility:", e);
+            console.error('Error parsing datasetVisibility:', e);
             return {};
         }
     }
     return {};
 }
-function processDynamicSnapshots(data) {
-    seriesData = {};
-    data.forEach((snapshot) => {
-        const time = new Date(snapshot.SnapshotTime * 1000);
-        const inheritedAreaName = snapshot.Area && snapshot.Area.Name && snapshot.Area.Level !== undefined
-            ? `${snapshot.Area.Name} (${snapshot.Area.Level})`
-            : undefined;
-        flattenSnapshot(snapshot, time, "", inheritedAreaName);
-    });
+function addPoint(seriesKey, value, time, preTitles) {
+    if (!seriesData[seriesKey]) {
+        seriesData[seriesKey] = [];
+    }
+    const tooltipLines = Array.isArray(preTitles) ? preTitles : [preTitles];
+    seriesData[seriesKey].push({ x: time, y: value, preTitles: tooltipLines });
 }
 function refreshFile() {
     return __awaiter(this, void 0, void 0, function* () {
@@ -68,19 +71,19 @@ function refreshFile() {
                 readFile(file);
             }
             catch (error) {
-                console.error("Error refreshing file:", error);
-                alert("Error refreshing file. Please try re-selecting it.");
+                console.error('Error refreshing file:', error);
+                alert('Error refreshing file. Please try re-selecting it.');
             }
         }
         else {
-            alert("No persistent file selection available. Please select a file using the button.");
+            alert('No persistent file selection available. Please select a file using the button.');
         }
     });
 }
 function selectFileFS() {
     return __awaiter(this, void 0, void 0, function* () {
         if (!window.showOpenFilePicker) {
-            alert("The File System Access API is not supported in this browser.");
+            alert('The File System Access API is not supported in this browser.');
             return;
         }
         try {
@@ -90,30 +93,44 @@ function selectFileFS() {
             readFile(file);
         }
         catch (error) {
-            console.error("Error selecting file via FS API:", error);
+            console.error('Error selecting file via FS API:', error);
         }
     });
+}
+function addPointsForObject(obj, keyPrefix, time, preTitleLines) {
+    for (const key in obj) {
+        if (!Object.prototype.hasOwnProperty.call(obj, key))
+            continue;
+        if (EXCLUDED_KEYS.has(key))
+            continue;
+        const fullKey = keyPrefix ? `${keyPrefix}${keyConnecter}${key}` : key;
+        const value = obj[key];
+        if (typeof value === 'number') {
+            addPoint(fullKey, value, time, preTitleLines);
+        }
+        else if (value && typeof value === 'object') {
+            addPointsForObject(value, fullKey, time, preTitleLines);
+        }
+    }
 }
 function readFile(file) {
     const reader = new FileReader();
     reader.onload = () => {
         try {
             let fileContent = reader.result;
-            if (typeof fileContent !== "string") {
+            if (typeof fileContent !== 'string') {
                 fileContent = String(fileContent);
             }
             fileContent = fileContent.trim();
-            console.log("File content (first 500 chars):", fileContent.slice(0, 500));
             const jsonData = JSON.parse(fileContent);
             if (!Array.isArray(jsonData)) {
-                alert("JSON must be an array of snapshots!");
+                alert('JSON must be an array of snapshots!');
                 return;
             }
-            processDynamicSnapshots(jsonData);
-            renderChartDynamic();
+            processSchemaSnapshots(jsonData);
         }
         catch (err) {
-            alert("Error parsing JSON file!");
+            alert('Error parsing JSON file!');
             console.error(err);
         }
     };
@@ -137,60 +154,28 @@ function stringToColor(str) {
     }
     const toHex = (c) => {
         const hex = c.toString(16);
-        return hex.length === 1 ? "0" + hex : hex;
+        return hex.length === 1 ? '0' + hex : hex;
     };
-    return "#" + toHex(r) + toHex(g) + toHex(b);
-}
-function flattenSnapshot(obj, time, prefix = "", inheritedAreaName) {
-    let areaInfo = inheritedAreaName;
-    if (obj.areaName && typeof obj.areaName === "string") {
-        areaInfo = obj.areaName;
-    }
-    else if (obj.Name && obj.Level !== undefined) {
-        areaInfo = `${obj.Name} (${obj.Level})`;
-    }
-    for (const key in obj) {
-        if (obj.hasOwnProperty(key)) {
-            if (key === "SnapshotTime")
-                continue;
-            const value = obj[key];
-            const newPrefix = prefix ? `${prefix}-${key}` : key;
-            if (value !== null &&
-                typeof value === "object" &&
-                !Array.isArray(value)) {
-                flattenSnapshot(value, time, newPrefix, areaInfo);
-            }
-            else if (typeof value === "number") {
-                if (!seriesData[newPrefix]) {
-                    seriesData[newPrefix] = [];
-                }
-                seriesData[newPrefix].push({
-                    x: time,
-                    y: value,
-                    areaName: areaInfo,
-                });
-            }
-        }
-    }
+    return '#' + toHex(r) + toHex(g) + toHex(b);
 }
 function updateFieldSelector() {
-    const fieldContainer = document.getElementById("fieldSelector");
+    const fieldContainer = document.getElementById('fieldSelector');
     if (!fieldContainer || !chartInstance)
         return;
-    fieldContainer.innerHTML = "";
+    fieldContainer.innerHTML = '';
     const visibilityMap = loadVisibilityMap();
     const datasetInfo = chartInstance.data.datasets.map((dataset, index) => ({
         label: dataset.label,
         color: dataset.borderColor,
         visible: chartInstance.isDatasetVisible(index),
-        index: index,
+        index: index
     }));
     datasetInfo.sort((a, b) => a.label.localeCompare(b.label));
     datasetInfo.forEach((info) => {
-        const itemDiv = document.createElement("div");
-        itemDiv.className = "field-item";
+        const itemDiv = document.createElement('div');
+        itemDiv.className = 'field-item';
         if (info.visible) {
-            itemDiv.classList.add("active");
+            itemDiv.classList.add('active');
         }
         itemDiv.onclick = () => {
             const currentlyVisible = chartInstance.isDatasetVisible(info.index);
@@ -200,26 +185,60 @@ function updateFieldSelector() {
             chartInstance.update();
             updateFieldSelector();
         };
-        const colorBox = document.createElement("div");
-        colorBox.className = "color-box";
+        const colorBox = document.createElement('div');
+        colorBox.className = 'color-box';
         colorBox.style.backgroundColor = info.color;
-        const labelSpan = document.createElement("span");
-        labelSpan.className = "field-label";
+        const labelSpan = document.createElement('span');
+        labelSpan.className = 'field-label';
         labelSpan.innerText = info.label;
         itemDiv.appendChild(colorBox);
         itemDiv.appendChild(labelSpan);
         fieldContainer.appendChild(itemDiv);
     });
 }
+function processSchemaSnapshots(data) {
+    data.sort((a, b) => a.SnapshotTime - b.SnapshotTime);
+    seriesData = {};
+    let cumulativeTimeSeconds = 0;
+    data.forEach((snapshot) => {
+        const time = new Date(snapshot.SnapshotTime * 1000);
+        const areaLine = snapshot.StartArea && snapshot.EndArea
+            ? `${snapshot.StartArea.Name} (${snapshot.StartArea.Level}) → ${snapshot.EndArea.Name} (${snapshot.EndArea.Level})`
+            : snapshot.StartArea
+                ? `${snapshot.StartArea.Name} (${snapshot.StartArea.Level})`
+                : '';
+        const startLabel = snapshot.StartArea && snapshot.StartArea.Name && snapshot.StartArea.Name.toLocaleLowerCase().includes('hideout')
+            ? 'Hideout'
+            : `Act ${snapshot.StartArea.Act}`;
+        const endLabel = snapshot.EndArea && snapshot.EndArea.Name && snapshot.EndArea.Name.toLocaleLowerCase().includes('hideout') ? 'Hideout' : `Act ${snapshot.EndArea.Act}`;
+        const actLine = snapshot.StartArea ? (snapshot.EndArea ? (startLabel === endLabel ? startLabel : `${startLabel} → ${endLabel}`) : startLabel) : '';
+        if (typeof snapshot.AreaTimeSeconds === 'number') {
+            cumulativeTimeSeconds += snapshot.AreaTimeSeconds;
+        }
+        const cumulativeTimeLine = cumulativeTimeSeconds > 0 ? `Cumulative Time: ${formatCumulativeTime(cumulativeTimeSeconds)}` : '';
+        const preTitleLines = [];
+        if (actLine) {
+            preTitleLines.push(actLine);
+        }
+        if (areaLine) {
+            preTitleLines.push(areaLine);
+        }
+        if (cumulativeTimeLine) {
+            preTitleLines.push(cumulativeTimeLine);
+        }
+        addPointsForObject(snapshot, '', time, preTitleLines);
+    });
+    renderChartDynamic();
+}
 function renderChartDynamic() {
-    const chartContainer = document.getElementById("chartWrapper");
+    const chartContainer = document.getElementById('chartWrapper');
     if (!chartContainer)
         return;
-    chartContainer.innerHTML = "";
-    const canvas = document.createElement("canvas");
-    canvas.id = "mainChart";
-    canvas.style.width = "100%";
-    canvas.style.height = "100%";
+    chartContainer.innerHTML = '';
+    const canvas = document.createElement('canvas');
+    canvas.id = 'mainChart';
+    canvas.style.width = '100%';
+    canvas.style.height = '100%';
     chartContainer.appendChild(canvas);
     const datasets = [];
     const seriesKeys = Object.keys(seriesData);
@@ -227,9 +246,7 @@ function renderChartDynamic() {
     for (let i = 0; i < seriesKeys.length; i++) {
         const seriesKey = seriesKeys[i];
         const sortedData = seriesData[seriesKey].sort((a, b) => a.x.getTime() - b.x.getTime());
-        const isVisible = typeof visibilityMap[seriesKey] !== "undefined"
-            ? visibilityMap[seriesKey]
-            : seriesKey === "Player-Level";
+        const isVisible = typeof visibilityMap[seriesKey] !== 'undefined' ? visibilityMap[seriesKey] : seriesKey === `Player${keyConnecter}Level`;
         datasets.push({
             label: seriesKey,
             data: sortedData,
@@ -237,7 +254,7 @@ function renderChartDynamic() {
             backgroundColor: stringToColor(seriesKey),
             fill: false,
             tension: 0.1,
-            hidden: !isVisible,
+            hidden: !isVisible
         });
     }
     let minTime = Infinity;
@@ -257,118 +274,118 @@ function renderChartDynamic() {
         }
         return acc;
     }, []);
-    const suggestedMin = visibleYValues.length > 0
-        ? Math.floor(Math.min(...visibleYValues))
-        : undefined;
-    const suggestedMax = visibleYValues.length > 0
-        ? Math.ceil(Math.max(...visibleYValues))
-        : undefined;
+    const suggestedMin = visibleYValues.length > 0 ? Math.floor(Math.min(...visibleYValues)) : undefined;
+    const suggestedMax = visibleYValues.length > 0 ? Math.ceil(Math.max(...visibleYValues)) : undefined;
     const config = {
-        type: "line",
+        type: 'line',
         data: {
-            datasets: datasets,
+            datasets: datasets
         },
         options: {
+            datasetDecimation: {
+                enabled: true,
+                algorithm: 'lttb'
+            },
             responsive: true,
             maintainAspectRatio: false,
             parsing: false,
             interaction: {
-                mode: "nearest",
-                axis: "x",
-                intersect: false,
+                mode: 'nearest',
+                axis: 'x',
+                intersect: false
             },
             layout: {
-                padding: { left: 2, right: 2, bottom: 10, top: 10 },
+                padding: { left: 2, right: 2, bottom: 10, top: 10 }
             },
             animation: {
-                duration: 0,
+                duration: 0
             },
             scales: {
                 x: {
-                    type: "time",
+                    type: 'time',
                     time: {
                         round: false,
-                        tooltipFormat: "MMM d, h:mm:ss a",
+                        tooltipFormat: 'MMM d, h:mm:ss a',
                         displayFormats: {
-                            millisecond: "h:mm:ss a",
-                            second: "h:mm:ss a",
-                            minute: "h:mm a",
-                            hour: "MMM d, h:mm a",
-                            day: "MMM d",
-                            week: "MMM d",
-                            month: "MMM yyyy",
-                            quarter: "MMM yyyy",
-                            year: "yyyy",
-                        },
+                            millisecond: 'h:mm:ss a',
+                            second: 'h:mm:ss a',
+                            minute: 'h:mm a',
+                            hour: 'MMM d, h:mm a',
+                            day: 'MMM d',
+                            week: 'MMM d',
+                            month: 'MMM yyyy',
+                            quarter: 'MMM yyyy',
+                            year: 'yyyy'
+                        }
                     },
                     grid: {
-                        color: "rgba(238, 238, 238, 0.1)",
-                        drawBorder: false,
+                        color: 'rgba(238, 238, 238, 0.1)',
+                        drawBorder: false
                     },
                     ticks: {
-                        color: "#eeeeee",
+                        color: '#eeeeee',
                         maxRotation: 30,
                         minRotation: 0,
                         font: {
                             size: 15,
-                            family: "system-ui, -apple-system, sans-serif",
-                            weight: "400",
+                            family: 'system-ui, -apple-system, sans-serif',
+                            weight: '400'
                         },
                         autoSkip: true,
                         autoSkipPadding: 40,
-                        maxTicksLimit: 20,
+                        maxTicksLimit: 20
                     },
                     title: {
                         display: true,
-                        text: "Time",
-                        color: "#eeeeee",
+                        text: 'Time',
+                        color: '#eeeeee',
                         font: {
                             size: 15,
-                            weight: "500",
-                            family: "system-ui, -apple-system, sans-serif",
+                            weight: '500',
+                            family: 'system-ui, -apple-system, sans-serif'
                         },
-                        padding: { top: 10, bottom: 10 },
+                        padding: { top: 10, bottom: 10 }
                     },
                     min: isFinite(minTime) ? new Date(minTime - 60 * 1000) : undefined,
                     max: isFinite(maxTime) ? new Date(maxTime + 60 * 1000) : undefined,
-                    bounds: "ticks",
+                    bounds: 'ticks',
                     offset: false,
                     adapters: {
                         date: {
-                            zone: "local",
-                        },
-                    },
+                            zone: 'local'
+                        }
+                    }
                 },
                 y: {
                     grid: {
-                        color: "rgba(238, 238, 238, 0.1)",
-                        drawBorder: false,
+                        color: 'rgba(238, 238, 238, 0.1)',
+                        drawBorder: false
                     },
                     ticks: {
-                        color: "#eeeeee",
+                        color: '#eeeeee',
                         font: {
                             size: 14,
-                            family: "system-ui, -apple-system, sans-serif",
-                            weight: "400",
+                            family: 'system-ui, -apple-system, sans-serif',
+                            weight: '400'
                         },
                         padding: 8,
                         suggestedMin: suggestedMin,
-                        suggestedMax: suggestedMax,
+                        suggestedMax: suggestedMax
                     },
                     title: {
                         display: true,
-                        text: "Value",
-                        color: "#eeeeee",
+                        text: 'Value',
+                        color: '#eeeeee',
                         font: {
                             size: 14,
-                            weight: "500",
-                            family: "system-ui, -apple-system, sans-serif",
+                            weight: '500',
+                            family: 'system-ui, -apple-system, sans-serif'
                         },
-                        padding: { top: 4, bottom: 4 },
+                        padding: { top: 4, bottom: 4 }
                     },
-                    bounds: "data",
-                    offset: true,
-                },
+                    bounds: 'data',
+                    offset: true
+                }
             },
             plugins: {
                 tooltip: {
@@ -377,72 +394,70 @@ function renderChartDynamic() {
                             return [tooltipItems[0].label];
                         },
                         title: function (tooltipItems) {
-                            for (let i = 0; i < tooltipItems.length; i++) {
-                                const raw = tooltipItems[i].raw;
-                                if (raw && raw.areaName) {
-                                    return [raw.areaName];
-                                }
+                            const raw = tooltipItems[0].raw;
+                            if (raw && raw.preTitles) {
+                                return raw.preTitles;
                             }
-                            return [];
+                            return raw && raw.areaName ? [raw.areaName] : [];
                         },
                         label: function (tooltipItem) {
-                            const datasetLabel = tooltipItem.dataset.label || "";
+                            const datasetLabel = tooltipItem.dataset.label || '';
                             const value = tooltipItem.parsed.y;
                             const formattedValue = Number(value).toLocaleString();
                             return `${datasetLabel}: ${formattedValue}`;
-                        },
-                    },
+                        }
+                    }
                 },
                 legend: {
-                    display: false,
+                    display: false
                 },
                 zoom: {
                     pan: {
                         enabled: true,
-                        mode: "x",
-                        threshold: 10,
+                        mode: 'x',
+                        threshold: 10
                     },
                     zoom: {
                         wheel: {
-                            enabled: true,
+                            enabled: true
                         },
                         pinch: {
-                            enabled: true,
+                            enabled: true
                         },
-                        mode: "x",
-                    },
-                },
-            },
+                        mode: 'x'
+                    }
+                }
+            }
         },
-        plugins: [verticalLinePlugin],
+        plugins: [verticalLinePlugin]
     };
     if (chartInstance !== null) {
         chartInstance.destroy();
     }
-    const ctx = canvas.getContext("2d");
+    const ctx = canvas.getContext('2d');
     chartInstance = new Chart(ctx, config);
-    canvas.addEventListener("mousedown", (event) => {
+    canvas.addEventListener('mousedown', (event) => {
         if (event.button === 1) {
             event.preventDefault();
         }
     });
-    canvas.addEventListener("mouseup", (event) => {
+    canvas.addEventListener('mouseup', (event) => {
         if (event.button === 1 && chartInstance) {
             chartInstance.resetZoom();
         }
     });
     updateFieldSelector();
 }
-document.addEventListener("DOMContentLoaded", () => {
-    const selectButton = document.getElementById("select-file-button");
-    const refreshButton = document.getElementById("refresh-button");
+document.addEventListener('DOMContentLoaded', () => {
+    const selectButton = document.getElementById('select-file-button');
+    const refreshButton = document.getElementById('refresh-button');
     if (selectButton) {
-        selectButton.addEventListener("click", () => {
+        selectButton.addEventListener('click', () => {
             selectFileFS();
         });
     }
     if (refreshButton) {
-        refreshButton.addEventListener("click", () => {
+        refreshButton.addEventListener('click', () => {
             refreshFile();
         });
     }
